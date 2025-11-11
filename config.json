@@ -1,11 +1,11 @@
 {
-  "car_mass_kg": 100,
+  "car_mass_kg": 170,
   "drag_coefficient": 0.22,
   "rolling_resistance_coefficient": 0.02,
   "car_frontal_area_m2": 0.8,
   "air_density_kgpm3": 1.225,
   "gravity_mps2": 9.81,
-  "motor_max_power_watts": 900.0,
+  "motor_max_power_watts": 1000,
   "motor_max_drive_force_newton": 92.0,
   "drivetrain_efficiency": 0.78,
   "brake_max_force_newton": 400.0,
@@ -20,9 +20,5 @@
   "simulation_time_step_seconds": 2,
   "animation_refresh_interval_ms": 1,
   "ga_time_step_seconds": 0.2,
-  "ga_generations": 46,
-  "ga_population_size": 36,
-  "ga_mutation_rate": 0.12,
-  "ga_crossover_rate": 0.9,
-  "ga_elite_count": 2
+  "ga_generations": 40
 }

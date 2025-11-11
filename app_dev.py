@@ -10,14 +10,15 @@ import io
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
+# Note: The global lock (config_file_lock) has been removed as per your request.
+
 # Constants for view names
 VIEW_SIMULATION = "simulation"
 VIEW_PARAMETERS = "parameters"
 VIEW_GA = "ga_settings"
 
-# FIXED COLOR SCHEME: Team Envision PK Cyan-Green Dark Mode
-# Primary accent color: #00B894 is a true Cyan-Green, matching the website's logo and highlights.
-COLOR_PRIMARY = "#009915"  # Primary accent color (Strong Cyan-Green from teamenvision.pk)
+# FIXED COLOR SCHEME: Define a professional color palette
+COLOR_PRIMARY = "#00FF00"  # Bright Green for main accents/sliders
 COLOR_BG_DEEP = "#0D1117"  # Main deep slate background
 COLOR_CARD_DARK = "#161B22"  # Subtle background for cards/containers
 COLOR_DIVIDER = "#3A404C"  # Soft, complementary blue-grey divider
@@ -26,9 +27,10 @@ COLOR_TEXT_SECONDARY = ft.Colors.GREY_500
 COLOR_INPUT_BG = "#1F242C"  # Background for input fields
 
 # New Colors for Buttons and Glow Effect
-COLOR_GLOW_GREEN = "#00FF45"  # Bright, neon green for glow
-COLOR_DANGER_RED = "#FF2323" # Strong red for Stop button
-COLOR_GLOW_RED = "#FF4545"  # Bright red for Stop glow
+COLOR_BUTTON_GREEN = "#00E000"  # Slightly subdued green for button background
+COLOR_GLOW_GREEN = "#00FFC0"  # Bright, neon green for glow
+COLOR_DANGER_RED = ft.Colors.RED_700  # Strong red for Stop button background
+COLOR_GLOW_RED = ft.Colors.RED_ACCENT_400  # Bright red for Stop glow
 
 
 # ---------------------------
@@ -58,13 +60,6 @@ def labeled_text_field(page, label, value, suffix="", config_key: Optional[str] 
     def save_to_config(v):
         if not config_key: return
 
-        # 1. READ existing configuration file content
-        try:
-            with open(CONFIG_PATH, "r") as f:
-                cfg = json.load(f)
-        except Exception:
-            cfg = {}
-
         txt_clean = v.replace(suffix, "").strip()
 
         # 2. UPDATE only the modified key (with type conversion)
@@ -77,6 +72,13 @@ def labeled_text_field(page, label, value, suffix="", config_key: Optional[str] 
         except ValueError:
             return
 
+        # 1. READ existing configuration file content
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                cfg = json.load(f)
+        except Exception:
+            cfg = {}
+
         cfg[config_key] = new_v
 
         # 3. WRITE the complete, updated configuration back
@@ -85,6 +87,7 @@ def labeled_text_field(page, label, value, suffix="", config_key: Optional[str] 
                 json.dump(cfg, f, indent=2)
         except Exception as e:
             pass
+        # Note: No lock applied here.
 
     def on_field_submit(e):
         save_to_config(e.control.value)
@@ -143,6 +146,7 @@ def labeled_switch(page, label, value, config_key: Optional[str] = None):
                 json.dump(cfg, f, indent=2)
         except Exception as e:
             pass
+        # Note: No lock applied here.
 
     def on_switch_change(e):
         save_to_config(e.control.value)
@@ -208,12 +212,14 @@ def labeled_slider(page, label, minv, maxv, value, divisions=None, suffix="", fm
             cfg = {}
 
         try:
+            # Apply new value
             val = float(v)
             if ".0f" in fmt:
                 cfg[config_key] = int(round(val))
             else:
                 cfg[config_key] = val
         except Exception:
+            # Don't save if value is invalid, but don't crash
             return
 
         try:
@@ -221,6 +227,7 @@ def labeled_slider(page, label, minv, maxv, value, divisions=None, suffix="", fm
                 json.dump(cfg, f, indent=2)
         except Exception as e:
             pass
+        # Note: No lock applied here.
 
     def on_slider_change(e):
         v = e.control.value
@@ -454,18 +461,16 @@ def main(page: ft.Page):
                     ft.LineChartData(
                         data_points=[ft.LineChartDataPoint(x, y) for x, y in
                                      zip(telemetry_data["time"], telemetry_data["velocity"])],
-                        color=COLOR_PRIMARY,  # Cyan-Green for Velocity
+                        color=COLOR_PRIMARY,
                         stroke_width=2.5,
-                        point_radius=0
                     )
                 ]
                 pow_series = [
                     ft.LineChartData(
                         data_points=[ft.LineChartDataPoint(x, y) for x, y in
                                      zip(telemetry_data["time"], power_kw)],
-                        color=ft.Colors.ORANGE,  # Keep Orange for Power for contrast
+                        color=ft.Colors.ORANGE,
                         stroke_width=2.5,
-                        point_radius=0
                     )
                 ]
                 right_velocity_chart.data_series = vel_series
@@ -570,12 +575,12 @@ def main(page: ft.Page):
             ft.Row([
                 ft.Image(
                     src="Team-Envision-Logo.webp",
-                    height=50,
-                    width=185,  # Adjusted width for horizontal logo look
+                    height=30,
+                    width=170,  # Adjusted width for horizontal logo look
                     fit=ft.ImageFit.CONTAIN
                 ),
                 ft.Container(expand=True)  # Ensure it aligns left
-            ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=5),
+            ], vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=10),
             # =======================
             ft.Divider(color=COLOR_DIVIDER, height=20),
             ft.Text("Debug Console", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_300),
@@ -614,6 +619,7 @@ def main(page: ft.Page):
     def update_glow(container, is_disabled, glow_color):
         if container and container.shadow:
             opacity = 0.7 if not is_disabled else 0.1
+            # Assuming the shadow is a list of BoxShadows
             container.shadow[0].color = ft.Colors.with_opacity(opacity, glow_color)
 
     def append_console(msg: str):
@@ -625,41 +631,40 @@ def main(page: ft.Page):
         page.update()
 
     def backend_callback(msg, prog, done):
-        def ui_push():
-            if isinstance(msg, dict):
-                return
+        # Flet handles thread safety by allowing page.update() to be called from a background thread.
 
-            status_text.value = msg
-            if prog > 0:
-                progress.value = prog
+        if isinstance(msg, dict):
+            return
 
-            append_console(msg)
+        status_text.value = msg
+        if prog > 0:
+            progress.value = prog
 
-            if "Simulation complete" in msg or "Final telemetry data saved" in msg:
-                try:
-                    tele = backend.load_final_telemetry()
-                    populate_charts_from_data(tele)
-                    load_history()
-                except Exception as e:
-                    append_console(f"Error loading final telemetry: {e}")
+        append_console(msg)
 
-            if done:
-                start_button.disabled = False
-                start_ga_button.disabled = False
-                run_both_button.disabled = False
-                stop_button.disabled = True
-                progress.value = 0
-                status_text.value = "Process finished. Ready."
+        if "Simulation complete" in msg or "Final telemetry data saved" in msg:
+            try:
+                tele = backend.load_final_telemetry()
+                populate_charts_from_data(tele)
+                load_history()
+            except Exception as e:
+                append_console(f"Error loading final telemetry: {e}")
 
-            # --- GLOW UPDATE LOGIC ---
-            update_glow(start_button_container, start_button.disabled, COLOR_GLOW_GREEN)
-            update_glow(start_ga_button_container, start_ga_button.disabled, COLOR_GLOW_GREEN)
-            update_glow(run_both_button_container, run_both_button.disabled, COLOR_GLOW_GREEN)
-            update_glow(stop_button_container, stop_button.disabled, COLOR_GLOW_RED)
+        if done:
+            start_button.disabled = False
+            start_ga_button.disabled = False
+            run_both_button.disabled = False
+            stop_button.disabled = True
+            progress.value = 0
+            status_text.value = "Process finished. Ready."
 
-            page.update()
+        # --- GLOW UPDATE LOGIC ---
+        update_glow(start_button_container, start_button.disabled, COLOR_GLOW_GREEN)
+        update_glow(start_ga_button_container, start_ga_button.disabled, COLOR_GLOW_GREEN)
+        update_glow(run_both_button_container, run_both_button.disabled, COLOR_GLOW_GREEN)
+        update_glow(stop_button_container, stop_button.disabled, COLOR_GLOW_RED)
 
-        page.run_thread_safe(ui_push)
+        page.update()
 
     # --- Parameter setup (Code is the same here) ---
     config_values = backend.load_config()
@@ -859,6 +864,13 @@ def main(page: ft.Page):
         stop_button.disabled = False
         progress.value = None
         status_text.value = "Starting GA..."
+
+        # GLOW UPDATE
+        update_glow(start_button_container, True, COLOR_GLOW_GREEN)
+        update_glow(start_ga_button_container, True, COLOR_GLOW_GREEN)
+        update_glow(run_both_button_container, True, COLOR_GLOW_GREEN)
+        update_glow(stop_button_container, False, COLOR_GLOW_RED)
+
         page.update()
         threading.Thread(target=backend.run_both_async, args=(backend_callback,), daemon=True).start()
 
@@ -869,6 +881,13 @@ def main(page: ft.Page):
         stop_button.disabled = False
         progress.value = None
         status_text.value = "Starting GA optimization..."
+
+        # GLOW UPDATE
+        update_glow(start_button_container, True, COLOR_GLOW_GREEN)
+        update_glow(start_ga_button_container, True, COLOR_GLOW_GREEN)
+        update_glow(run_both_button_container, True, COLOR_GLOW_GREEN)
+        update_glow(stop_button_container, False, COLOR_GLOW_RED)
+
         page.update()
         threading.Thread(target=backend.run_ga_async, args=(backend_callback,), daemon=True).start()
 
@@ -879,6 +898,13 @@ def main(page: ft.Page):
         stop_button.disabled = False
         progress.value = None
         status_text.value = "Starting simulation..."
+
+        # GLOW UPDATE
+        update_glow(start_button_container, True, COLOR_GLOW_GREEN)
+        update_glow(start_ga_button_container, True, COLOR_GLOW_GREEN)
+        update_glow(run_both_button_container, True, COLOR_GLOW_GREEN)
+        update_glow(stop_button_container, False, COLOR_GLOW_RED)
+
         page.update()
         threading.Thread(target=backend.run_simulation_async, args=(backend_callback,), daemon=True).start()
 
@@ -887,10 +913,17 @@ def main(page: ft.Page):
         stopped = backend.stop_current_process()
         append_console("Stop requested." if stopped else "No process was running.")
         stop_button.disabled = True
+
+        # GLOW UPDATE
+        update_glow(stop_button_container, True, COLOR_GLOW_RED)
+
         page.update()
 
-    # Use more vibrant Colors for buttons to stand out against the dark background, but keep them professional.
-    button_style = ft.ButtonStyle(padding=12, shape=ft.RoundedRectangleBorder(radius=6))  # No explicit color here
+    # Use vibrant Colors for buttons to stand out against the dark background.
+    button_style_green = ft.ButtonStyle(padding=12, shape=ft.RoundedRectangleBorder(radius=6),
+                                        color=ft.Colors.BLACK)  # Black text on bright green
+    button_style_red = ft.ButtonStyle(padding=12, shape=ft.RoundedRectangleBorder(radius=6),
+                                      color=ft.Colors.WHITE)  # White text on red
 
     # Helper to wrap the button in a container with a glowing shadow
     def create_glow_container(button_control, glow_color):
@@ -901,7 +934,7 @@ def main(page: ft.Page):
                 ft.BoxShadow(
                     spread_radius=1,
                     blur_radius=15,
-                    # Opacity will be dynamically updated in backend_callback based on disabled status
+                    # Initial opacity will be set later in main()
                     color=ft.Colors.with_opacity(0.1, glow_color),
                     offset=ft.Offset(0, 0),
                     blur_style=ft.ShadowBlurStyle.OUTER,
@@ -913,28 +946,24 @@ def main(page: ft.Page):
     # 1. Define the actual ElevatedButtons (Controls)
     start_button = ft.ElevatedButton("Run Simulation",
                                      icon=ft.Icons.PLAY_ARROW_ROUNDED,
-                                     bgcolor=COLOR_PRIMARY,
-                                     color=ft.Colors.BLACK,
-                                     on_click=on_run_sim, style=button_style)
+                                     bgcolor=COLOR_BUTTON_GREEN,
+                                     on_click=on_run_sim, style=button_style_green)
 
     start_ga_button = ft.ElevatedButton("Run GA Optimization",
                                         icon=ft.Icons.INSIGHTS_ROUNDED,
-                                        bgcolor=COLOR_PRIMARY,
-                                        color=ft.Colors.BLACK,
-                                        on_click=on_run_ga, style=button_style)
+                                        bgcolor=COLOR_BUTTON_GREEN,
+                                        on_click=on_run_ga, style=button_style_green)
 
     run_both_button = ft.ElevatedButton("GA → Simulation",
                                         icon=ft.Icons.DOUBLE_ARROW_ROUNDED,
-                                        bgcolor=COLOR_PRIMARY,
-                                        color=ft.Colors.BLACK,
-                                        on_click=on_run_both, style=button_style)
+                                        bgcolor=COLOR_BUTTON_GREEN,
+                                        on_click=on_run_both, style=button_style_green)
 
     stop_button = ft.ElevatedButton("Stop Process",
                                     icon=ft.Icons.STOP_ROUNDED,
                                     bgcolor=COLOR_DANGER_RED,
-                                    color=ft.Colors.WHITE,
                                     on_click=on_stop, disabled=True,
-                                    style=button_style)
+                                    style=button_style_red)
 
     # 2. Define the Containers with Glow (Wrappers)
     start_button_container = create_glow_container(start_button, COLOR_GLOW_GREEN)
@@ -1031,7 +1060,7 @@ def main(page: ft.Page):
 
     # ---------- Initialize the view ----------
     page.add(layout)
-    # The initial update to set the glow state correctly (all enabled except Stop)
+
     update_glow(start_button_container, start_button.disabled, COLOR_GLOW_GREEN)
     update_glow(start_ga_button_container, start_ga_button.disabled, COLOR_GLOW_GREEN)
     update_glow(run_both_button_container, run_both_button.disabled, COLOR_GLOW_GREEN)

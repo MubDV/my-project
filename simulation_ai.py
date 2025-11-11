@@ -457,10 +457,8 @@ if __name__ == "__main__":
         )
 
         print("--- GA run completed ---")
-        # --- End of new block ---
 
     else:
-        # Script was run directly without --run_ga, use defaults
         print("--- GA Started Directly (using script defaults) ---")
         run_ga()
 

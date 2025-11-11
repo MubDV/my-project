@@ -419,8 +419,7 @@ if len(straight_sections) > 0:
                 }, f)
             print("Final telemetry data saved to telemetry.json.")
 
-            # Close the Matplotlib window gracefully
-            plt.close(fig)
+
 
         return car_dot, line_vel, line_avg, line_pow  # Return all animated elements (Note: hud update is outside of blit elements)
 
