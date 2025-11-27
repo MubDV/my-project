@@ -10,7 +10,8 @@ import io
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
-# Note: The global lock (config_file_lock) has been removed as per your request.
+# Re-introduce a lock to prevent concurrent writes that overwrite config
+config_file_lock = threading.Lock()
 
 # Constants for view names
 VIEW_SIMULATION = "simulation"
@@ -55,39 +56,57 @@ def labeled_text_field(page, label, value, suffix="", config_key: Optional[str] 
         bgcolor=COLOR_INPUT_BG,
         content_padding=ft.padding.only(left=6, right=6),
         text_style=ft.TextStyle(size=12)
+        
     )
 
-    def save_to_config(v):
-        if not config_key: return
-
-        txt_clean = v.replace(suffix, "").strip()
-
-        # 2. UPDATE only the modified key (with type conversion)
+    def _read_config_safe():
+        """Read config file, return dict (never None)."""
         try:
-            # Attempt to infer type (int or float)
-            if "." in txt_clean or "e" in txt_clean.lower():
-                new_v = float(txt_clean)
-            else:
-                new_v = int(txt_clean)
-        except ValueError:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _atomic_write_config(cfg):
+        """Write cfg atomically to CONFIG_PATH using temp file + os.replace."""
+        tmp_path = CONFIG_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, CONFIG_PATH)
+
+    def save_to_config(v):
+        if not config_key:
             return
 
-        # 1. READ existing configuration file content
+        txt_clean = str(v).replace(suffix, "").strip()
+        # Determine numeric type if possible
+        new_v = None
         try:
-            with open(CONFIG_PATH, "r") as f:
-                cfg = json.load(f)
-        except Exception:
-            cfg = {}
+            if txt_clean.lower() in ("true", "false"):
+                new_v = txt_clean.lower() == "true"
+            elif "." in txt_clean or "e" in txt_clean.lower():
+                new_v = float(txt_clean)
+            else:
+                # attempt int, fallback to float if necessary
+                new_v = int(txt_clean)
+        except ValueError:
+            try:
+                new_v = float(txt_clean)
+            except ValueError:
+                # Not a number — store raw string only if the existing key wasn't numeric
+                new_v = txt_clean
 
-        cfg[config_key] = new_v
-
-        # 3. WRITE the complete, updated configuration back
-        try:
-            with open(CONFIG_PATH, "w") as f:
-                json.dump(cfg, f, indent=2)
-        except Exception as e:
-            pass
-        # Note: No lock applied here.
+        # Atomic read/modify/write under lock to avoid overwriting config from other threads
+        with config_file_lock:
+            cfg = _read_config_safe()
+            cfg[config_key] = new_v
+            try:
+                _atomic_write_config(cfg)
+            except Exception as e:
+                # Silently ignore write failure but log to console for debugging
+                print(f"Error writing config: {e}")
 
     def on_field_submit(e):
         save_to_config(e.control.value)
@@ -95,11 +114,13 @@ def labeled_text_field(page, label, value, suffix="", config_key: Optional[str] 
         txt = e.control.value.replace(suffix, "").strip()
         try:
             v = float(txt)
+            # If it's an integer-like float and input didn't contain '.' or 'e', display as int
             if v == int(v) and "." not in txt and "e" not in txt.lower():
                 value_field.value = f"{int(round(v))}{suffix}"
             else:
                 value_field.value = f"{v:.4f}{suffix}".rstrip('0').rstrip('.')
         except ValueError:
+            # keep user's input unchanged if parsing fails
             pass
         page.update()
 
@@ -130,23 +151,32 @@ def labeled_switch(page, label, value, config_key: Optional[str] = None):
 
     switch_control = ft.Switch(value=bool(value), active_color=COLOR_PRIMARY)
 
-    def save_to_config(v):
-        if not config_key: return
-
+    def _read_config_safe():
         try:
-            with open(CONFIG_PATH, "r") as f:
-                cfg = json.load(f)
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
         except Exception:
-            cfg = {}
+            return {}
 
-        cfg[config_key] = bool(v)
+    def _atomic_write_config(cfg):
+        tmp_path = CONFIG_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, CONFIG_PATH)
 
-        try:
-            with open(CONFIG_PATH, "w") as f:
-                json.dump(cfg, f, indent=2)
-        except Exception as e:
-            pass
-        # Note: No lock applied here.
+    def save_to_config(v):
+        if not config_key:
+            return
+
+        with config_file_lock:
+            cfg = _read_config_safe()
+            cfg[config_key] = bool(v)
+            try:
+                _atomic_write_config(cfg)
+            except Exception as e:
+                print(f"Error writing config: {e}")
 
     def on_switch_change(e):
         save_to_config(e.control.value)
@@ -177,7 +207,8 @@ def labeled_slider(page, label, minv, maxv, value, divisions=None, suffix="", fm
                    config_key: Optional[str] = None):
     label_text = ft.Text(label, color=COLOR_TEXT_PRIMARY, size=12, width=170)
     initial_value = float(value)
-    if ".0f" in fmt:
+    # Detect integer format by checking fmt string containing no decimal spec
+    if "{:.0f}" in fmt or fmt.endswith(".0f}"):
         initial_value_str = f"{int(round(initial_value))}{suffix}"
     else:
         initial_value_str = fmt.format(initial_value) + suffix
@@ -202,36 +233,44 @@ def labeled_slider(page, label, minv, maxv, value, divisions=None, suffix="", fm
         inactive_color="#404040",
     )
 
-    def save_to_config(v):
-        if not config_key: return
-
+    def _read_config_safe():
         try:
-            with open(CONFIG_PATH, "r") as f:
-                cfg = json.load(f)
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
         except Exception:
-            cfg = {}
+            return {}
 
+    def _atomic_write_config(cfg):
+        tmp_path = CONFIG_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, CONFIG_PATH)
+
+    def save_to_config(v):
+        if not config_key:
+            return
         try:
-            # Apply new value
             val = float(v)
-            if ".0f" in fmt:
+        except Exception:
+            return
+
+        with config_file_lock:
+            cfg = _read_config_safe()
+            # preserve integerness if fmt requests integer
+            if "{:.0f}" in fmt or fmt.endswith(".0f}"):
                 cfg[config_key] = int(round(val))
             else:
                 cfg[config_key] = val
-        except Exception:
-            # Don't save if value is invalid, but don't crash
-            return
-
-        try:
-            with open(CONFIG_PATH, "w") as f:
-                json.dump(cfg, f, indent=2)
-        except Exception as e:
-            pass
-        # Note: No lock applied here.
+            try:
+                _atomic_write_config(cfg)
+            except Exception as e:
+                print(f"Error writing config: {e}")
 
     def on_slider_change(e):
         v = e.control.value
-        if ".0f" in fmt:
+        if "{:.0f}" in fmt or fmt.endswith(".0f}"):
             value_field.value = f"{int(round(v))}{suffix}"
         else:
             value_field.value = fmt.format(v) + suffix
@@ -244,7 +283,7 @@ def labeled_slider(page, label, minv, maxv, value, divisions=None, suffix="", fm
             v = float(txt)
             v = max(minv, min(maxv, v))
             slider.value = v
-            if ".0f" in fmt:
+            if "{:.0f}" in fmt or fmt.endswith(".0f}"):
                 value_field.value = f"{int(round(v))}{suffix}"
             else:
                 value_field.value = fmt.format(v) + suffix
@@ -303,6 +342,10 @@ def open_chart_dialog(page, chart_title: str, chart_data_series: list):
                             text_align=ft.TextAlign.CENTER)
     )
 
+    def close_dialog():
+        page.dialog.open = False
+        page.update()
+
     close_button = ft.ElevatedButton("Close", on_click=lambda e: close_dialog(), bgcolor=COLOR_PRIMARY)
 
     chart_container = ft.Container(
@@ -328,10 +371,6 @@ def open_chart_dialog(page, chart_title: str, chart_data_series: list):
         content_padding=0,
         bgcolor=COLOR_BG_DEEP,
     )
-
-    def close_dialog():
-        page.dialog.open = False
-        page.update()
 
     page.dialog = dialog
     dialog.open = True
